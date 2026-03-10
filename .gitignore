@@ -94,7 +94,6 @@ claude.config.json
 .aider*
 .continue/
 
-AGENTS.md
 CLAUDE.md
 CODEX.md
 GEMINI.md
@@ -124,3 +123,4 @@ tests/test_data/**/backtest/**
 !tests/test_data/nautilus/*/**.parquet
 !tests/integration_tests/adapters/betfair/responses/*.log
 !/nautilus_core/adapters/src/databento/test_data/*
+!.codex/worktree_init.sh

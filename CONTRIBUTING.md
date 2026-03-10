@@ -18,6 +18,7 @@ To contribute, follow these steps:
 
 3. Install and configure [pre-commit](https://pre-commit.com/) on your local machine to automatically run code checks, formatters, and linters before each commit.
    You can install pre-commit with:
+
     ```bash
     pip install pre-commit
     pre-commit install
@@ -27,7 +28,7 @@ To contribute, follow these steps:
 
 5. The CI system will run the full test suite on your code including all unit and integration tests, so include appropriate tests with the PR.
 
-6. Read and understand the Contributor License Agreement (CLA), available at https://github.com/nautechsystems/nautilus_trader/blob/develop/CLA.md.
+6. Read and understand the Contributor License Agreement (CLA), available at <https://github.com/nautechsystems/nautilus_trader/blob/develop/CLA.md>.
 
 7. You will also be required to sign the CLA, which is administered automatically through [CLA Assistant](https://cla-assistant.io/).
 
@@ -37,5 +38,7 @@ To contribute, follow these steps:
 
 - Follow the established coding practices in the [Developer Guide](https://nautilustrader.io/docs/developer_guide/index.html).
 - For documentation changes, follow the style guide in `docs/developer_guide/docs.md` (use sentence case for headings H2 and below).
+- For Codex-assisted work, follow the repository contract in `AGENTS.md` and
+  `docs/developer_guide/codex.md`.
 - Keep PRs small and focused for easier review.
 - Reference the relevant GitHub issue(s) in your PR comment.
