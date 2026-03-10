@@ -19,6 +19,7 @@ This approach combines Python's simplicity and ecosystem with Rust's performance
 - [Testing](testing.md)
 - [Test Datasets](test_datasets.md)
 - [Docs Style](docs.md)
+- [Codex Workflow](codex.md)
 - [Release Notes](releases.md)
 - [Adapters](adapters.md)
 - [Data Testing Spec](spec_data_testing.md)
