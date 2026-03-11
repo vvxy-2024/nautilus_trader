@@ -531,6 +531,357 @@ def create_tearsheet_from_stats(
         return fig.to_html()
 
 
+def create_backtest_reports_html(
+    engine: BacktestEngine,
+    output_path: str | None = "backtest_reports.html",
+    title: str = "NautilusTrader Backtest Reports",
+    theme: str = "plotly_white",
+) -> str | None:
+    """
+    Generate a static HTML report from backtest orders, positions, and account reports.
+
+    The report includes:
+    - Order activity curve over time (cumulative filled quantity by instrument).
+    - Position realized PnL curve over time (cumulative by instrument).
+    - Account total balance curve over time (grouped by currency).
+    - Final realized PnL summary table (per asset with total).
+
+    Parameters
+    ----------
+    engine : BacktestEngine
+        The backtest engine with completed run.
+    output_path : str, optional
+        Path to save HTML report. If None, returns HTML string.
+    title : str, default "NautilusTrader Backtest Reports"
+        Title for the report.
+    theme : str, default "plotly_white"
+        Theme name for styling.
+
+    Returns
+    -------
+    str or None
+        HTML string if output_path is None, otherwise None.
+
+    Raises
+    ------
+    ImportError
+        If plotly is not installed.
+
+    """
+    if not PLOTLY_AVAILABLE:
+        msg = (
+            "plotly is required for visualization. "
+            "Install it with: pip install nautilus_trader[visualization]"
+        )
+        raise ImportError(msg)
+
+    from nautilus_trader.analysis.themes import get_theme
+
+    PyCondition.not_none(engine, "engine")
+
+    theme_config = _normalize_theme_config(get_theme(theme))
+    orders_report = engine.trader.generate_order_fills_report()
+    positions_report = engine.trader.generate_positions_report()
+    account_reports = _collect_account_reports(engine)
+
+    fig = _create_backtest_reports_figure(
+        orders_report=orders_report,
+        positions_report=positions_report,
+        account_reports=account_reports,
+        title=title,
+        theme_config=theme_config,
+    )
+
+    if output_path:
+        fig.write_html(output_path)
+        return None
+
+    return fig.to_html()
+
+
+def _collect_account_reports(engine: BacktestEngine) -> dict[str, pd.DataFrame]:
+    """
+    Collect per-account reports from the engine cache.
+    """
+    from nautilus_trader.analysis.reporter import ReportProvider
+
+    reports: dict[str, pd.DataFrame] = {}
+
+    for idx, account in enumerate(engine.cache.accounts(), start=1):
+        report = ReportProvider.generate_account_report(account)
+        if report.empty:
+            continue
+
+        account_id = str(getattr(account, "id", f"ACCOUNT-{idx}"))
+        reports[account_id] = report
+
+    return reports
+
+
+def _create_backtest_reports_figure(
+    orders_report: pd.DataFrame,
+    positions_report: pd.DataFrame,
+    account_reports: dict[str, pd.DataFrame],
+    title: str,
+    theme_config: dict[str, Any],
+) -> go.Figure:
+    """
+    Create figure for the backtest reports HTML export.
+    """
+    fig = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=[
+            "Orders cumulative filled quantity by asset",
+            "Positions cumulative realized PnL by asset",
+            "Account total balance by currency",
+            "Final realized PnL by asset",
+        ],
+        specs=[
+            [{"type": "scatter"}, {"type": "scatter"}],
+            [{"type": "scatter"}, {"type": "table"}],
+        ],
+        vertical_spacing=0.16,
+        horizontal_spacing=0.12,
+        row_heights=[0.62, 0.38],
+    )
+
+    color_cycle = [
+        theme_config["colors"]["primary"],
+        theme_config["colors"]["positive"],
+        theme_config["colors"]["negative"],
+        theme_config["colors"]["neutral"],
+    ]
+
+    orders_curves = _build_orders_curves(orders_report)
+    for idx, (asset, group) in enumerate(orders_curves.groupby("asset")):
+        fig.add_trace(
+            go.Scatter(
+                x=group["ts"],
+                y=group["cum_filled_qty"],
+                mode="lines+markers",
+                name=f"Orders {asset}",
+                line={"color": color_cycle[idx % len(color_cycle)], "width": 2},
+            ),
+            row=1,
+            col=1,
+        )
+    fig.update_xaxes(title_text="Time", row=1, col=1)
+    fig.update_yaxes(title_text="Cumulative filled quantity", row=1, col=1)
+
+    positions_curves = _build_positions_curves(positions_report)
+    for idx, (asset, group) in enumerate(positions_curves.groupby("asset")):
+        fig.add_trace(
+            go.Scatter(
+                x=group["ts"],
+                y=group["cum_realized_pnl"],
+                mode="lines+markers",
+                name=f"PnL {asset}",
+                line={"color": color_cycle[idx % len(color_cycle)], "width": 2},
+            ),
+            row=1,
+            col=2,
+        )
+    fig.update_xaxes(title_text="Time", row=1, col=2)
+    fig.update_yaxes(title_text="Cumulative realized PnL", row=1, col=2)
+
+    account_curves = _build_account_curves(account_reports)
+    for idx, (asset, group) in enumerate(account_curves.groupby("asset")):
+        fig.add_trace(
+            go.Scatter(
+                x=group["ts"],
+                y=group["total_balance"],
+                mode="lines+markers",
+                name=f"Account {asset}",
+                line={"color": color_cycle[idx % len(color_cycle)], "width": 2},
+            ),
+            row=2,
+            col=1,
+        )
+    fig.update_xaxes(title_text="Time", row=2, col=1)
+    fig.update_yaxes(title_text="Account total balance", row=2, col=1)
+
+    final_pnl_summary = _build_final_pnl_summary(positions_curves)
+    final_pnl_values = [f"{value:.4f}" for value in final_pnl_summary["final_realized_pnl"]]
+    final_pnl_table = go.Table(
+        header={
+            "values": ["<b>Asset</b>", "<b>Final realized PnL</b>"],
+            "fill_color": theme_config["colors"]["primary"],
+            "font": {"color": "white", "size": 12},
+            "align": "left",
+        },
+        cells={
+            "values": [final_pnl_summary["asset"], final_pnl_values],
+            "fill_color": theme_config["colors"]["table_row_even"],
+            "align": "left",
+            "font": {"size": 11, "color": theme_config["colors"]["table_text"]},
+        },
+    )
+    fig.add_trace(final_pnl_table, row=2, col=2)
+
+    fig.update_layout(
+        title_text=title,
+        template=theme_config["template"],
+        height=1200,
+        showlegend=True,
+        margin={"t": 150, "b": 50, "l": 50, "r": 50},
+    )
+
+    return fig
+
+
+def _build_orders_curves(report: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build order curves with cumulative filled quantity grouped by instrument.
+    """
+    if report.empty:
+        return pd.DataFrame(columns=["asset", "ts", "cum_filled_qty"])
+
+    time_col = "ts_last" if "ts_last" in report.columns else "ts_init"
+    qty_col = "filled_qty" if "filled_qty" in report.columns else "quantity"
+    if time_col not in report.columns or qty_col not in report.columns:
+        return pd.DataFrame(columns=["asset", "ts", "cum_filled_qty"])
+
+    frame = report.copy()
+    frame["asset"] = (
+        frame["instrument_id"].astype(str)
+        if "instrument_id" in frame.columns
+        else pd.Series(["ALL"] * len(frame), index=frame.index)
+    )
+    frame["ts"] = pd.to_datetime(frame[time_col], errors="coerce")
+    frame["qty"] = _coerce_numeric(frame[qty_col]).fillna(0.0)
+    frame = frame.dropna(subset=["ts"])
+
+    if frame.empty:
+        return pd.DataFrame(columns=["asset", "ts", "cum_filled_qty"])
+
+    frame = frame.sort_values(["asset", "ts"])
+    frame["cum_filled_qty"] = frame.groupby("asset", sort=False)["qty"].cumsum()
+
+    return frame[["asset", "ts", "cum_filled_qty"]]
+
+
+def _build_positions_curves(report: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build position curves with cumulative realized PnL grouped by instrument.
+    """
+    if report.empty or "realized_pnl" not in report.columns:
+        return pd.DataFrame(columns=["asset", "ts", "cum_realized_pnl"])
+
+    frame = report.copy()
+    frame["asset"] = (
+        frame["instrument_id"].astype(str)
+        if "instrument_id" in frame.columns
+        else pd.Series(["ALL"] * len(frame), index=frame.index)
+    )
+
+    ts_closed = pd.to_datetime(frame["ts_closed"], errors="coerce") if "ts_closed" in frame else None
+    ts_opened = pd.to_datetime(frame["ts_opened"], errors="coerce") if "ts_opened" in frame else None
+    if ts_closed is not None and ts_opened is not None:
+        frame["ts"] = ts_closed.fillna(ts_opened)
+    elif ts_closed is not None:
+        frame["ts"] = ts_closed
+    elif ts_opened is not None:
+        frame["ts"] = ts_opened
+    else:
+        return pd.DataFrame(columns=["asset", "ts", "cum_realized_pnl"])
+
+    frame["realized_pnl_value"] = _coerce_numeric(frame["realized_pnl"]).fillna(0.0)
+    frame = frame.dropna(subset=["ts"])
+
+    if frame.empty:
+        return pd.DataFrame(columns=["asset", "ts", "cum_realized_pnl"])
+
+    frame = frame.sort_values(["asset", "ts"])
+    frame["cum_realized_pnl"] = frame.groupby("asset", sort=False)["realized_pnl_value"].cumsum()
+
+    return frame[["asset", "ts", "cum_realized_pnl"]]
+
+
+def _build_account_curves(reports: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Build account balance curves grouped by currency.
+    """
+    if not reports:
+        return pd.DataFrame(columns=["asset", "ts", "total_balance"])
+
+    curves: list[pd.DataFrame] = []
+
+    for account_name, report in reports.items():
+        if report.empty or "total" not in report.columns:
+            continue
+
+        frame = report.copy()
+        frame["ts"] = pd.to_datetime(frame.index, errors="coerce")
+        frame["total_balance"] = _coerce_numeric(frame["total"])
+        frame["asset"] = (
+            frame["currency"].astype(str)
+            if "currency" in frame.columns
+            else pd.Series([account_name] * len(frame), index=frame.index)
+        )
+        frame = frame.dropna(subset=["ts", "total_balance"])
+        if frame.empty:
+            continue
+
+        curves.append(frame[["asset", "ts", "total_balance"]])
+
+    if not curves:
+        return pd.DataFrame(columns=["asset", "ts", "total_balance"])
+
+    merged = pd.concat(curves, ignore_index=True)
+    merged = merged.groupby(["asset", "ts"], as_index=False)["total_balance"].sum()
+    merged = merged.sort_values(["asset", "ts"])
+
+    return merged
+
+
+def _build_final_pnl_summary(position_curves: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build final realized PnL summary table from position curves.
+    """
+    if position_curves.empty:
+        return pd.DataFrame(
+            {
+                "asset": ["N/A", "TOTAL"],
+                "final_realized_pnl": [0.0, 0.0],
+            },
+        )
+
+    summary = (
+        position_curves.groupby("asset", sort=True)["cum_realized_pnl"]
+        .last()
+        .reset_index(name="final_realized_pnl")
+    )
+    total_value = float(summary["final_realized_pnl"].sum())
+    summary = pd.concat(
+        [
+            summary,
+            pd.DataFrame(
+                {
+                    "asset": ["TOTAL"],
+                    "final_realized_pnl": [total_value],
+                },
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    return summary
+
+
+def _coerce_numeric(values: pd.Series) -> pd.Series:
+    """
+    Extract numeric values from mixed scalar/string series.
+    """
+    cleaned = (
+        values.astype(str)
+        .str.replace("_", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .str.extract(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", expand=False)
+    )
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
 def create_equity_curve(
     returns: pd.Series,
     output_path: str | None = None,

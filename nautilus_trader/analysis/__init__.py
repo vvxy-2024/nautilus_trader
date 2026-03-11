@@ -35,6 +35,7 @@ from nautilus_trader.analysis.reporter import ReportProvider
 from nautilus_trader.analysis.statistic import PortfolioStatistic
 from nautilus_trader.analysis.tearsheet import create_drawdown_chart
 from nautilus_trader.analysis.tearsheet import create_equity_curve
+from nautilus_trader.analysis.tearsheet import create_backtest_reports_html
 from nautilus_trader.analysis.tearsheet import create_monthly_returns_heatmap
 from nautilus_trader.analysis.tearsheet import create_returns_distribution
 from nautilus_trader.analysis.tearsheet import create_rolling_sharpe
@@ -108,6 +109,7 @@ __all__ = [
     "WinRate",
     "create_drawdown_chart",
     "create_equity_curve",
+    "create_backtest_reports_html",
     "create_monthly_returns_heatmap",
     "create_returns_distribution",
     "create_rolling_sharpe",

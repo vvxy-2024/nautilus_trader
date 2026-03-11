@@ -30,6 +30,7 @@ from nautilus_trader.analysis.tearsheet import PLOTLY_AVAILABLE
 from nautilus_trader.analysis.tearsheet import _create_stats_table
 from nautilus_trader.analysis.tearsheet import _create_tearsheet_figure
 from nautilus_trader.analysis.tearsheet import _normalize_theme_config
+from nautilus_trader.analysis.tearsheet import create_backtest_reports_html
 from nautilus_trader.analysis.tearsheet import create_drawdown_chart
 from nautilus_trader.analysis.tearsheet import create_equity_curve
 from nautilus_trader.analysis.tearsheet import create_monthly_returns_heatmap
@@ -401,6 +402,126 @@ def test_create_tearsheet_from_stats_saves_file(sample_returns, sample_stats, tm
     # Assert
     assert result is None  # Returns None when writing to file
     assert output_path.exists()
+
+
+def test_create_backtest_reports_html_returns_html_with_multi_asset_summary(monkeypatch):
+    # Arrange
+    orders_report = pd.DataFrame(
+        {
+            "instrument_id": ["ESM4.XCME", "NQM4.XCME", "ESM4.XCME"],
+            "filled_qty": ["2", "3", "1"],
+            "ts_last": pd.to_datetime(
+                ["2024-05-09 10:00:00", "2024-05-09 10:01:00", "2024-05-09 10:02:00"],
+            ),
+        },
+    )
+    positions_report = pd.DataFrame(
+        {
+            "instrument_id": ["ESM4.XCME", "NQM4.XCME", "ESM4.XCME"],
+            "realized_pnl": ["50.00 USD", "-20.00 USD", "15.00 USD"],
+            "ts_closed": pd.to_datetime(
+                ["2024-05-09 10:00:00", "2024-05-09 10:01:00", "2024-05-09 10:03:00"],
+            ),
+        },
+    )
+    account_report = pd.DataFrame(
+        {
+            "currency": ["USD", "USD", "USD"],
+            "total": ["1_000_000.00 USD", "1_000_030.00 USD", "1_000_045.00 USD"],
+        },
+        index=pd.to_datetime(
+            ["2024-05-09 09:59:00", "2024-05-09 10:01:00", "2024-05-09 10:03:00"],
+        ),
+    )
+
+    class MockTrader:
+        @staticmethod
+        def generate_order_fills_report():
+            return orders_report
+
+        @staticmethod
+        def generate_positions_report():
+            return positions_report
+
+    class MockEngine:
+        trader = MockTrader()
+
+    monkeypatch.setattr(
+        "nautilus_trader.analysis.tearsheet._collect_account_reports",
+        lambda _engine: {"SIM-001": account_report},
+    )
+
+    # Act
+    html = create_backtest_reports_html(
+        engine=MockEngine(),
+        output_path=None,
+        title="Static Backtest Report",
+    )
+
+    # Assert
+    assert html is not None
+    assert isinstance(html, str)
+    assert "Static Backtest Report" in html
+    assert "Final realized PnL by asset" in html
+    assert "ESM4.XCME" in html
+    assert "NQM4.XCME" in html
+
+
+def test_create_backtest_reports_html_saves_file(monkeypatch, tmp_path):
+    # Arrange
+    orders_report = pd.DataFrame(
+        {
+            "instrument_id": ["BTCUSDT.BINANCE"],
+            "filled_qty": ["1.5"],
+            "ts_last": pd.to_datetime(["2024-01-01 00:00:00"]),
+        },
+    )
+    positions_report = pd.DataFrame(
+        {
+            "instrument_id": ["BTCUSDT.BINANCE"],
+            "realized_pnl": ["100.0 USDT"],
+            "ts_closed": pd.to_datetime(["2024-01-01 00:05:00"]),
+        },
+    )
+    account_report = pd.DataFrame(
+        {
+            "currency": ["USDT"],
+            "total": ["10_100.00 USDT"],
+        },
+        index=pd.to_datetime(["2024-01-01 00:05:00"]),
+    )
+
+    class MockTrader:
+        @staticmethod
+        def generate_order_fills_report():
+            return orders_report
+
+        @staticmethod
+        def generate_positions_report():
+            return positions_report
+
+    class MockEngine:
+        trader = MockTrader()
+
+    output_path = tmp_path / "backtest_reports.html"
+
+    monkeypatch.setattr(
+        "nautilus_trader.analysis.tearsheet._collect_account_reports",
+        lambda _engine: {"BINANCE-001": account_report},
+    )
+
+    # Act
+    result = create_backtest_reports_html(
+        engine=MockEngine(),
+        output_path=str(output_path),
+        title="Backtest Report Export",
+    )
+
+    # Assert
+    assert result is None
+    assert output_path.exists()
+    assert output_path.stat().st_size > 0
+    assert "plotly" in output_path.read_text().lower()
 
 
 def test_get_theme_with_valid_name():
